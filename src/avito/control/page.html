@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Слежу за Avito</title>
+<style>
+:root {
+  --blue: #00aaff;
+  --blue-dark: #0092db;
+  --green: #04e061;
+  --red: #ff4053;
+  --ink: #000;
+  --grey: #8c8c8c;
+  --line: #ebebeb;
+  --bg: #f2f1f0;
+  --card: #fff;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none; }
+body {
+  margin: 0; padding: 28px 16px 64px; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+main { max-width: 760px; margin: 0 auto; }
+h1 { font-size: 26px; font-weight: 700; margin: 0 0 20px; letter-spacing: -.02em; }
+h2 { font-size: 18px; font-weight: 700; margin: 0 0 16px; }
+.card {
+  background: var(--card); border-radius: 16px; padding: 22px; margin-bottom: 16px;
+}
+.line { display: flex; gap: 10px; flex-wrap: wrap; }
+.line input {
+  flex: 1; min-width: 220px; padding: 13px 15px; border: 1px solid var(--line);
+  border-radius: 10px; font-size: 15px; background: #fff; color: var(--ink);
+}
+.line input:focus { outline: 0; border-color: var(--blue); }
+button {
+  padding: 13px 22px; border: 0; border-radius: 10px; background: var(--blue);
+  color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+button:hover { background: var(--blue-dark); }
+button.small { padding: 8px 14px; font-size: 14px; font-weight: 500; }
+button.plain { background: #f2f1f0; color: var(--ink); }
+button.plain:hover { background: #e6e5e4; }
+button.warn { background: #fff0f1; color: var(--red); }
+button.warn:hover { background: var(--red); color: #fff; }
+button:disabled { opacity: .45; cursor: default; }
+.hint { color: var(--grey); font-size: 13px; margin-top: 12px; }
+.msg { margin-top: 12px; font-size: 14px; min-height: 19px; }
+.msg.err { color: var(--red); }
+.msg.ok { color: #05b64f; }
+.head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; }
+.dot.on { background: var(--green); }
+.dot.run { background: var(--blue); }
+.dot.off { background: var(--grey); }
+.dot.err { background: var(--red); }
+.state { color: var(--grey); font-size: 14px; }
+.state b { color: var(--ink); font-weight: 600; }
+.item { padding: 16px 0; border-top: 1px solid var(--line); }
+.item:first-child { border-top: 0; padding-top: 0; }
+.item-name { font-size: 16px; font-weight: 600; }
+.item-name.off { color: var(--grey); }
+.meta { color: var(--grey); font-size: 13px; margin-top: 4px; word-break: break-all; }
+.buttons { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.empty { color: var(--grey); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Слежу за Avito</h1>
+
+  <div class="card">
+    <div class="head">
+      <div class="state" id="state">загружаем…</div>
+      <button class="small plain" id="check">Проверить сейчас</button>
+    </div>
+    <div class="line">
+      <input type="text" id="url" placeholder="Вставьте ссылку с Avito">
+      <input type="text" id="name" placeholder="Название (необязательно)">
+      <button id="add">Добавить</button>
+    </div>
+    <div class="msg" id="msg"></div>
+    <div class="hint">
+      Найдите на Avito то, за чем хотите следить, выставьте фильтры как обычно,
+      скопируйте адрес из строки браузера и вставьте сюда. Вид «На карте» не
+      подойдёт — нужен «Списком». Проверяем примерно раз в час и присылаем на
+      почту только то, чего вы ещё не видели.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Письма</h2>
+    <div class="line">
+      <input type="text" id="email" placeholder="Почта для уведомлений">
+      <button id="mail-add">Добавить</button>
+    </div>
+    <div class="msg" id="mail-msg"></div>
+    <div id="mails"></div>
+  </div>
+
+  <div class="card">
+    <h2>Что я смотрю</h2>
+    <div id="subs" class="empty">пока ничего</div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = { searches: [], status: {}, notify: { emails: [] } };
+let armed = null;
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function left(ts) {
+  const m = Math.round((ts - Date.now() / 1000) / 60);
+  if (m <= 0) return "вот-вот";
+  return m < 60 ? `через ${m} мин` : `через ${Math.floor(m / 60)} ч ${m % 60} мин`;
+}
+
+function ago(ts) {
+  const m = Math.round((Date.now() / 1000 - ts) / 60);
+  if (m <= 0) return "только что";
+  return m < 60 ? `${m} мин назад` : `${Math.floor(m / 60)} ч ${m % 60} мин назад`;
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body ? {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  } : {});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "что-то пошло не так");
+  return data;
+}
+
+function say(text, kind) {
+  $("msg").textContent = text;
+  $("msg").className = "msg " + (kind || "");
+}
+
+async function act(fn) {
+  try {
+    await fn();
+    await refresh();
+  } catch (e) {
+    say(e.message, "err");
+  }
+}
+
+function subRow(s) {
+  const bits = [];
+  if (!s.enabled) bits.push("на паузе");
+  bits.push(s.last_at ? `был ${ago(s.last_at)}` : "ещё не проверяли");
+  if (s.enabled) {
+    bits.push(s.next_at > 0 ? `следующая ${left(s.next_at)}` : "проверка не запланирована");
+  }
+  if (s.errors) bits.push(`ошибок подряд: ${s.errors}`);
+  return `
+    <div class="item">
+      <div class="item-name ${s.enabled ? "" : "off"}">${esc(s.name)}</div>
+      <div class="meta">${bits.join(" · ")}</div>
+      <div class="meta"><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a></div>
+      <div class="buttons">
+        <button class="small warn" data-del="${esc(s.id)}">${armed === s.id ? "Точно удалить?" : "Удалить"}</button>
+      </div>
+    </div>`;
+}
+
+async function refresh() {
+  try {
+    state = await api("/api/state");
+  } catch (e) {
+    $("state").innerHTML = `<span class="dot err"></span>сервис не отвечает`;
+    return;
+  }
+  const s = state.status;
+  const live = state.searches.filter((x) => x.enabled).length;
+  const doing = String(s.activity ?? "").trim();
+  let text;
+  if (s.running) text = `<span class="dot run"></span>` +
+    (doing ? `проверяю: ${esc(doing)}` : "проверяю прямо сейчас");
+  else if (!state.searches.length) text = `<span class="dot off"></span>добавьте первую ссылку`;
+  else if (!live) text = `<span class="dot off"></span>всё на паузе`;
+  else text = `<span class="dot on"></span>слежу, следующая проверка ${left(s.next_at)}`;
+  if (s.error) text += ` · <span style="color:var(--red)">${esc(s.error)}</span>`;
+  if (state.notify.enabled) text += ` · шлю через <b>${esc(state.notify.targets.join(", "))}</b>`;
+  if (state.queue && state.queue.pending) text += ` · доставок ждут: ${state.queue.pending}`;
+  $("state").innerHTML = text;
+  $("check").disabled = s.running || !live;
+
+  $("subs").className = state.searches.length ? "" : "empty";
+  $("subs").innerHTML = state.searches.length
+    ? state.searches.map(subRow).join("")
+    : "пока ничего";
+
+  renderMails();
+}
+
+function mailSay(text) {
+  $("mail-msg").textContent = text;
+  $("mail-msg").className = "msg";
+}
+
+function renderMails() {
+  const mails = state.notify.emails || [];
+  $("mails").innerHTML = mails.map((m) =>
+    `<div class="line"><span>${esc(m)}</span>` +
+    `<button class="small plain" data-mail="${esc(m)}">убрать</button></div>`
+  ).join("") || "<i>пока некому слать</i>";
+}
+
+$("mail-add").onclick = () => act(async () => {
+  const email = $("email").value.trim();
+  if (!email) return mailSay("Вставьте адрес почты");
+  $("mail-add").disabled = true;
+  try {
+    const r = await api("/api/recipients", { action: "add", email });
+    state.notify.emails = r.emails;
+    $("email").value = "";
+    mailSay("Добавил");
+  } catch (e) {
+    mailSay(e.message);
+  } finally {
+    $("mail-add").disabled = false;
+  }
+});
+
+$("mails").onclick = async (e) => {
+  const btn = e.target.closest("button[data-mail]");
+  if (!btn) return;
+  act(async () => {
+    const r = await api("/api/recipients", { action: "remove", email: btn.dataset.mail });
+    state.notify.emails = r.emails;
+    mailSay("Убрал");
+  });
+};
+
+$("add").onclick = () => act(async () => {
+  const url = $("url").value.trim();
+  const name = $("name").value.trim();
+  if (!url) throw new Error("Вставьте ссылку с Avito");
+  $("add").disabled = true;
+  try {
+    await api("/api/save", { url, name, run_now: true });
+    $("url").value = "";
+    $("name").value = "";
+    say("Добавил, проверяю", "ok");
+  } finally {
+    $("add").disabled = false;
+  }
+});
+
+$("url").onkeydown = (e) => { if (e.key === "Enter") $("add").click(); };
+$("name").onkeydown = (e) => { if (e.key === "Enter") $("add").click(); };
+
+$("check").onclick = () => act(async () => {
+  $("check").disabled = true;
+  await api("/api/run", {});
+  say("Проверяю", "ok");
+});
+
+$("subs").onclick = (e) => {
+  const btn = e.target.closest("button[data-del]");
+  if (!btn) return;
+  const id = btn.dataset.del;
+  if (armed !== id) {
+    armed = id;
+    refresh();
+    setTimeout(() => { if (armed === id) { armed = null; refresh(); } }, 5000);
+    return;
+  }
+  armed = null;
+  act(async () => {
+    btn.disabled = true;
+    await api("/api/delete", { id });
+    say("Удалил", "ok");
+  });
+};
+
+refresh();
+setInterval(() => { if (!armed) refresh(); }, 5000);
+</script>
+</body>
+</html>

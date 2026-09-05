@@ -1,0 +1,53 @@
+x-image: &image "avito-parser:${AVITO_IMAGE_TAG:-1.0.0}"
+x-build: &build
+  context: .
+  args:
+    VCS_REF: "${VCS_REF:-unknown}"
+
+services:
+  data-init:
+    build: *build
+    image: *image
+    container_name: avito-parser-init
+    user: "0:0"
+    entrypoint: ["/usr/local/bin/avito-init-data"]
+    environment:
+      AVITO_UID: "1000"
+      AVITO_GID: "1000"
+    volumes:
+      - ./data:/app/data
+    network_mode: none
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  avito:
+    build: *build
+    image: *image
+    container_name: avito-parser
+    restart: unless-stopped
+    user: "1000:1000"
+    init: true
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOME: /app/home
+      WEB__PORT: "${AVITO_PORT:-8080}"
+    ports:
+      - "${AVITO_BIND_ADDRESS:-127.0.0.1}:${AVITO_PORT:-8080}:${AVITO_PORT:-8080}"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+    shm_size: 1gb
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
