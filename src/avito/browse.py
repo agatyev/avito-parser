@@ -114,11 +114,11 @@ def trim_cache(profile: Path) -> None:
         log.info("Кэш профиля вычищен: %d МБ", freed // (1024 * 1024))
 
 
-async def _step(name: str, coro, timeout: float):
+async def _soft(what: str, coro) -> None:
     try:
-        return await asyncio.wait_for(coro, timeout)
-    except TimeoutError:
-        raise TimeoutError(f"{name}: браузер не ответил за {timeout:.0f} с") from None
+        await asyncio.wait_for(coro, SOFT_TIMEOUT)
+    except Exception as exc:
+        log.info("Пропускаю необязательный шаг «%s»: %s", what, exc)
 
 
 async def _pause(page, low: float, high: float) -> None:
@@ -134,27 +134,10 @@ async def _scroll(page, screens: tuple[int, int] = (2, 5)) -> None:
             await _pause(page, 0.5, 1.5)
 
 
-async def _walk(page, link: str, known: set[str], max_pages: int, end: float) -> str:
-    def budget(reserve: float = 0.0) -> float:
-        left = end - time.monotonic() - reserve
-        if left <= 0:
-            raise TimeoutError("вышел бюджет времени на заход")
-        return min(left, STEP_TIMEOUT)
-
-    async def step(name: str, make, reserve: float = 0.0):
-        return await _step(name, make(), budget(reserve))
-
-    async def soft(name: str, make) -> None:
-        try:
-            await _step(name, make(), min(budget(), SOFT_TIMEOUT))
-        except Exception as exc:
-            log.info("Пропускаю необязательный шаг, %s", exc)
-
-    await step("главная: переход",
-               lambda: page.goto(HOME, referer=random.choice(REFERERS),
-                                 wait_until="domcontentloaded"), reserve=CARD_TIMEOUT / 1000)
-    await soft("главная: пауза", lambda: _pause(page, 1.5, 4.0))
-    await soft("главная: скролл", lambda: _scroll(page, (1, 3)))
+async def _walk(page, link: str, known: set[str], max_pages: int) -> str:
+    await page.goto(HOME, referer=random.choice(REFERERS), wait_until="domcontentloaded")
+    await _soft("пауза на главной", _pause(page, 1.5, 4.0))
+    await _soft("скролл главной", _scroll(page, (1, 3)))
 
     chunks: list[str] = []
     signatures: set[frozenset[str]] = set()
@@ -162,14 +145,12 @@ async def _walk(page, link: str, known: set[str], max_pages: int, end: float) ->
         label = f"выдача {number}"
         started = time.monotonic()
         target, referer = page_url(link, number), page.url
-        response = await step(f"{label}: переход", lambda target=target, referer=referer:
-                              page.goto(target, referer=referer, wait_until="domcontentloaded"))
+        response = await page.goto(target, referer=referer, wait_until="domcontentloaded")
         status = response.status if response else 0
-        await soft(f"{label}: пауза", lambda: _pause(page, 1.0, 2.5))
-        await soft(f"{label}: карточки",
-                   lambda: page.wait_for_selector(CARD, timeout=CARD_TIMEOUT))
-        await soft(f"{label}: скролл", lambda: _scroll(page))
-        html = await step(f"{label}: снятие HTML", lambda: page.content())
+        await _soft(f"{label}: пауза", _pause(page, 1.0, 2.5))
+        await _soft(f"{label}: карточки", page.wait_for_selector(CARD, timeout=CARD_TIMEOUT))
+        await _soft(f"{label}: скролл", _scroll(page))
+        html = await page.content()
         if blocked(html, status):
             raise Blocked(f"антибот Avito: HTTP {status}")
         if status >= 400:
@@ -200,11 +181,14 @@ async def _grab(profile: Path, link: str, known: set[str], max_pages: int) -> st
         humanize=HUMANIZE, block_webrtc=True, i_know_what_im_doing=True,
         persistent_context=True, user_data_dir=str(profile))
     try:
-        context = await _step("запуск браузера", browser.__aenter__(), LAUNCH_TIMEOUT)
+        context = await asyncio.wait_for(browser.__aenter__(), LAUNCH_TIMEOUT)
         context.set_default_timeout(STEP_TIMEOUT * 1000)
         context.set_default_navigation_timeout(STEP_TIMEOUT * 1000)
         page = context.pages[0] if context.pages else await context.new_page()
-        return await _walk(page, link, known, max_pages, time.monotonic() + PASS_DEADLINE)
+        try:
+            return await asyncio.wait_for(_walk(page, link, known, max_pages), PASS_DEADLINE)
+        except TimeoutError:
+            raise TimeoutError(f"заход не уложился в {PASS_DEADLINE} с") from None
     finally:
         with contextlib.suppress(BaseException):
             await asyncio.wait_for(browser.__aexit__(None, None, None), 20)

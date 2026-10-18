@@ -1,5 +1,4 @@
 import asyncio
-import time
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlparse
 
@@ -84,8 +83,7 @@ class FakePage:
 
 def walk(pages, known=(), max_pages=3):
     page = FakePage(pages)
-    html = asyncio.run(_walk(page, "https://www.avito.ru/all?q=дом", set(known),
-                             max_pages, time.monotonic() + 60))
+    html = asyncio.run(_walk(page, "https://www.avito.ru/all?q=дом", set(known), max_pages))
     return page.asked, html
 
 

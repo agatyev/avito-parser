@@ -32,8 +32,9 @@ def test_blocked_by_status_and_markers():
     assert not blocked(listing_page("1"), 200)
 
 
-def test_marker_without_cards_is_not_a_block():
+def test_page_with_cards_is_never_a_block():
     assert not blocked(listing_page("1") + "слишком много запросов", 200)
+    assert not blocked(listing_page("1") + '<div data-sitekey="x"></div>', 200)
 
 
 def test_empty_results():

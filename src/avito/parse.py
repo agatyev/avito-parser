@@ -14,10 +14,6 @@ BLOCKED_MARKERS = (
     "проверка безопасности", "слишком много запросов", "access denied",
     "verify you are human", "are you a robot", "checking your browser",
 )
-DECISIVE_MARKERS = (
-    "доступ ограничен", "проблема с ip", "подтвердите, что вы не робот",
-    "проверяем, что вы не робот", "verify you are human", "access denied",
-)
 BLOCKED_SELECTORS = (
     'iframe[src*="captcha"]', 'iframe[src*="geetest"]', 'form[action*="captcha"]',
     '[data-marker*="captcha"]', '[data-marker*="challenge"]', '.g-recaptcha', '#captcha',
@@ -122,12 +118,12 @@ def blocked(html: str, status: int = 0) -> bool:
     if status in (403, 418, 429):
         return True
     soup = BeautifulSoup(html, "lxml")
-    title = _text(soup.title).casefold()
-    visible = _text(soup.body or soup).casefold()
-    challenge = any(soup.select_one(selector) is not None for selector in BLOCKED_SELECTORS)
-    decisive = any(marker in title or marker in visible for marker in DECISIVE_MARKERS)
-    marker = any(marker in title or marker in visible for marker in BLOCKED_MARKERS)
-    return challenge or decisive or (marker and soup.select_one(CARD) is None)
+    if soup.select_one(CARD) is not None:
+        return False
+    if any(soup.select_one(selector) is not None for selector in BLOCKED_SELECTORS):
+        return True
+    text = f"{_text(soup.title)} {_text(soup.body or soup)}".casefold()
+    return any(marker in text for marker in BLOCKED_MARKERS)
 
 
 def empty_results(html: str) -> bool:
