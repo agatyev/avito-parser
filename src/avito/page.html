@@ -6,15 +6,8 @@
 <title>Слежу за Avito</title>
 <style>
 :root {
-  --blue: #00aaff;
-  --blue-dark: #0092db;
-  --green: #04e061;
-  --red: #ff4053;
-  --ink: #000;
-  --grey: #8c8c8c;
-  --line: #ebebeb;
-  --bg: #f2f1f0;
-  --card: #fff;
+  --blue: #00aaff; --blue-dark: #0092db; --green: #04e061; --red: #ff4053;
+  --ink: #000; --grey: #8c8c8c; --line: #ebebeb; --bg: #f2f1f0; --card: #fff;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none; }
@@ -25,10 +18,8 @@ body {
 main { max-width: 760px; margin: 0 auto; }
 h1 { font-size: 26px; font-weight: 700; margin: 0 0 20px; letter-spacing: -.02em; }
 h2 { font-size: 18px; font-weight: 700; margin: 0 0 16px; }
-.card {
-  background: var(--card); border-radius: 16px; padding: 22px; margin-bottom: 16px;
-}
-.line { display: flex; gap: 10px; flex-wrap: wrap; }
+.card { background: var(--card); border-radius: 16px; padding: 22px; margin-bottom: 16px; }
+.line { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .line input {
   flex: 1; min-width: 220px; padding: 13px 15px; border: 1px solid var(--line);
   border-radius: 10px; font-size: 15px; background: #fff; color: var(--ink);
@@ -53,19 +44,22 @@ button:disabled { opacity: .45; cursor: default; }
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap; margin-bottom: 16px;
 }
+.state { color: var(--grey); font-size: 14px; }
+.state b { color: var(--ink); font-weight: 600; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; }
 .dot.on { background: var(--green); }
 .dot.run { background: var(--blue); }
 .dot.off { background: var(--grey); }
 .dot.err { background: var(--red); }
-.state { color: var(--grey); font-size: 14px; }
-.state b { color: var(--ink); font-weight: 600; }
 .item { padding: 16px 0; border-top: 1px solid var(--line); }
 .item:first-child { border-top: 0; padding-top: 0; }
 .item-name { font-size: 16px; font-weight: 600; }
 .item-name.off { color: var(--grey); }
 .meta { color: var(--grey); font-size: 13px; margin-top: 4px; word-break: break-all; }
 .buttons { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.found { padding: 12px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.found:first-child { border-top: 0; }
+.wait { color: var(--blue); }
 a { color: var(--blue); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .empty { color: var(--grey); }
@@ -89,15 +83,20 @@ a:hover { text-decoration: underline; }
     <div class="hint">
       Найдите на Avito то, за чем хотите следить, выставьте фильтры как обычно,
       скопируйте адрес из строки браузера и вставьте сюда. Вид «На карте» не
-      подойдёт — нужен «Списком». Проверяем примерно раз в час и присылаем на
-      почту только то, чего вы ещё не видели.
+      подойдёт — нужен «Списком». Смотрю раз в час и присылаю на почту только то,
+      чего вы ещё не видели.
     </div>
   </div>
 
   <div class="card">
-    <h2>Письма</h2>
+    <h2>Что я смотрю</h2>
+    <div id="searches" class="empty">пока ничего</div>
+  </div>
+
+  <div class="card">
+    <h2>Куда слать</h2>
     <div class="line">
-      <input type="text" id="email" placeholder="Почта для уведомлений">
+      <input type="text" id="email" placeholder="Почта для писем">
       <button id="mail-add">Добавить</button>
     </div>
     <div class="msg" id="mail-msg"></div>
@@ -105,14 +104,14 @@ a:hover { text-decoration: underline; }
   </div>
 
   <div class="card">
-    <h2>Что я смотрю</h2>
-    <div id="subs" class="empty">пока ничего</div>
+    <h2>Находки</h2>
+    <div id="found" class="empty">пока ничего</div>
   </div>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let state = { searches: [], status: {}, notify: { emails: [] } };
+let state = { searches: [], found: [], status: {}, mail: { to: [] } };
 let armed = null;
 
 function esc(s) {
@@ -126,8 +125,9 @@ function left(ts) {
   return m < 60 ? `через ${m} мин` : `через ${Math.floor(m / 60)} ч ${m % 60} мин`;
 }
 
-function ago(ts) {
-  const m = Math.round((Date.now() / 1000 - ts) / 60);
+function ago(iso) {
+  if (!iso) return "ещё не смотрел";
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
   if (m <= 0) return "только что";
   return m < 60 ? `${m} мин назад` : `${Math.floor(m / 60)} ч ${m % 60} мин назад`;
 }
@@ -157,22 +157,28 @@ async function act(fn) {
   }
 }
 
-function subRow(s) {
-  const bits = [];
-  if (!s.enabled) bits.push("на паузе");
-  bits.push(s.last_at ? `был ${ago(s.last_at)}` : "ещё не проверяли");
-  if (s.enabled) {
-    bits.push(s.next_at > 0 ? `следующая ${left(s.next_at)}` : "проверка не запланирована");
-  }
-  if (s.errors) bits.push(`ошибок подряд: ${s.errors}`);
+function searchRow(s) {
+  const bits = [s.enabled ? ago(s.last_at) : "на паузе"];
   return `
     <div class="item">
       <div class="item-name ${s.enabled ? "" : "off"}">${esc(s.name)}</div>
       <div class="meta">${bits.join(" · ")}</div>
       <div class="meta"><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a></div>
       <div class="buttons">
+        <button class="small plain" data-toggle="${esc(s.id)}" data-on="${s.enabled ? 0 : 1}">
+          ${s.enabled ? "Пауза" : "Включить"}</button>
         <button class="small warn" data-del="${esc(s.id)}">${armed === s.id ? "Точно удалить?" : "Удалить"}</button>
       </div>
+    </div>`;
+}
+
+function foundRow(f) {
+  const bits = [f.price_text, f.address, f.date_text].filter(Boolean);
+  const mark = f.sent ? "" : ` · <span class="wait">ждёт отправки</span>`;
+  return `
+    <div class="found">
+      <a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.title)}</a>
+      <div class="meta">${esc(bits.join(" · "))} · ${esc(f.search)}${mark}</div>
     </div>`;
 }
 
@@ -188,61 +194,60 @@ async function refresh() {
   const doing = String(s.activity ?? "").trim();
   let text;
   if (s.running) text = `<span class="dot run"></span>` +
-    (doing ? `проверяю: ${esc(doing)}` : "проверяю прямо сейчас");
+    (doing ? `смотрю: ${esc(doing)}` : "смотрю прямо сейчас");
   else if (!state.searches.length) text = `<span class="dot off"></span>добавьте первую ссылку`;
   else if (!live) text = `<span class="dot off"></span>всё на паузе`;
-  else text = `<span class="dot on"></span>слежу, следующая проверка ${left(s.next_at)}`;
+  else text = `<span class="dot on"></span>слежу, следующий заход ${left(s.next_at)}`;
   if (s.error) text += ` · <span style="color:var(--red)">${esc(s.error)}</span>`;
-  if (state.notify.enabled) text += ` · шлю через <b>${esc(state.notify.targets.join(", "))}</b>`;
-  if (state.queue && state.queue.pending) text += ` · доставок ждут: ${state.queue.pending}`;
+  if (!state.mail.ready) text += ` · <span style="color:var(--red)">почта не настроена</span>`;
+  if (s.waiting) text += ` · ждут отправки: ${s.waiting}`;
   $("state").innerHTML = text;
   $("check").disabled = s.running || !live;
 
-  $("subs").className = state.searches.length ? "" : "empty";
-  $("subs").innerHTML = state.searches.length
-    ? state.searches.map(subRow).join("")
-    : "пока ничего";
+  $("searches").className = state.searches.length ? "" : "empty";
+  $("searches").innerHTML = state.searches.length
+    ? state.searches.map(searchRow).join("") : "пока ничего";
 
-  renderMails();
-}
+  $("found").className = state.found.length ? "" : "empty";
+  $("found").innerHTML = state.found.length
+    ? state.found.map(foundRow).join("") : "пока ничего";
 
-function mailSay(text) {
-  $("mail-msg").textContent = text;
-  $("mail-msg").className = "msg";
-}
-
-function renderMails() {
-  const mails = state.notify.emails || [];
-  $("mails").innerHTML = mails.map((m) =>
+  $("mails").innerHTML = (state.mail.to || []).map((m) =>
     `<div class="line"><span>${esc(m)}</span>` +
     `<button class="small plain" data-mail="${esc(m)}">убрать</button></div>`
   ).join("") || "<i>пока некому слать</i>";
 }
 
-$("mail-add").onclick = () => act(async () => {
+function mailSay(text) {
+  $("mail-msg").textContent = text;
+}
+
+$("mail-add").onclick = async () => {
   const email = $("email").value.trim();
   if (!email) return mailSay("Вставьте адрес почты");
   $("mail-add").disabled = true;
   try {
-    const r = await api("/api/recipients", { action: "add", email });
-    state.notify.emails = r.emails;
+    await api("/api/recipients", { action: "add", email });
     $("email").value = "";
     mailSay("Добавил");
+    await refresh();
   } catch (e) {
     mailSay(e.message);
   } finally {
     $("mail-add").disabled = false;
   }
-});
+};
 
 $("mails").onclick = async (e) => {
   const btn = e.target.closest("button[data-mail]");
   if (!btn) return;
-  act(async () => {
-    const r = await api("/api/recipients", { action: "remove", email: btn.dataset.mail });
-    state.notify.emails = r.emails;
+  try {
+    await api("/api/recipients", { action: "remove", email: btn.dataset.mail });
     mailSay("Убрал");
-  });
+    await refresh();
+  } catch (err) {
+    mailSay(err.message);
+  }
 };
 
 $("add").onclick = () => act(async () => {
@@ -251,10 +256,10 @@ $("add").onclick = () => act(async () => {
   if (!url) throw new Error("Вставьте ссылку с Avito");
   $("add").disabled = true;
   try {
-    await api("/api/save", { url, name, run_now: true });
+    await api("/api/add", { url, name });
     $("url").value = "";
     $("name").value = "";
-    say("Добавил, проверяю", "ok");
+    say("Добавил, смотрю прямо сейчас", "ok");
   } finally {
     $("add").disabled = false;
   }
@@ -266,10 +271,15 @@ $("name").onkeydown = (e) => { if (e.key === "Enter") $("add").click(); };
 $("check").onclick = () => act(async () => {
   $("check").disabled = true;
   await api("/api/run", {});
-  say("Проверяю", "ok");
+  say("Смотрю", "ok");
 });
 
-$("subs").onclick = (e) => {
+$("searches").onclick = (e) => {
+  const toggle = e.target.closest("button[data-toggle]");
+  if (toggle) {
+    return act(() => api("/api/toggle", {
+      id: toggle.dataset.toggle, enabled: toggle.dataset.on === "1" }));
+  }
   const btn = e.target.closest("button[data-del]");
   if (!btn) return;
   const id = btn.dataset.del;

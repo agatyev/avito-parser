@@ -1,32 +1,6 @@
 log_level: INFO
 db: data/avito.db
-
-control: [web]
-
-web:
-  host: 0.0.0.0
-  port: 8080
-
-watch:
-  period_minutes: 60
-  jitter_seconds: 300
-  max_per_cycle: 50
-  delivery_batch_size: 50
-  delivery_lease_seconds: 600
-  delivery_retry_seconds: 300
-  max_age_minutes: 1440
-  exclude: []
-  backoff_seconds: 900
-  max_backoff_seconds: 14400
-
-browser:
-  headless: virtual
-  humanize: 1.5
-  platform: windows
-  locale: ru-RU
-  timezone: Europe/Moscow
-  profile_dir: data/session
-  timeout_seconds: 60
-  deadline_seconds: 300
-  retire_after: 3
-  max_pages: 3
+every_minutes: 60
+max_pages: 3
+bind: 0.0.0.0
+port: 8080

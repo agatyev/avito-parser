@@ -1,44 +1,19 @@
-x-image: &image "avito-parser:${AVITO_IMAGE_TAG:-1.0.0}"
-x-build: &build
-  context: .
-  args:
-    VCS_REF: "${VCS_REF:-unknown}"
-
 services:
-  data-init:
-    build: *build
-    image: *image
-    container_name: avito-parser-init
-    user: "0:0"
-    entrypoint: ["/usr/local/bin/avito-init-data"]
-    environment:
-      AVITO_UID: "1000"
-      AVITO_GID: "1000"
-    volumes:
-      - ./data:/app/data
-    network_mode: none
-    restart: "no"
-    security_opt:
-      - no-new-privileges:true
-
   avito:
-    build: *build
-    image: *image
+    build:
+      context: .
+      args:
+        VCS_REF: "${VCS_REF:-unknown}"
+    image: "avito-parser:${AVITO_IMAGE_TAG:-2.0.0}"
     container_name: avito-parser
     restart: unless-stopped
-    user: "1000:1000"
     init: true
-    depends_on:
-      data-init:
-        condition: service_completed_successfully
+    user: "1000:1000"
     env_file:
       - path: .env
         required: false
-    environment:
-      HOME: /app/home
-      WEB__PORT: "${AVITO_PORT:-8080}"
     ports:
-      - "${AVITO_BIND_ADDRESS:-127.0.0.1}:${AVITO_PORT:-8080}:${AVITO_PORT:-8080}"
+      - "127.0.0.1:${AVITO_PORT:-8080}:8080"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data
