@@ -1,6 +1,5 @@
 .env
 *.db
-.browser-profile/
 __pycache__/
 *.py[cod]
 .venv/
