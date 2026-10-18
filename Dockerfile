@@ -23,7 +23,7 @@ RUN fc-cache -f
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="avito-parser" \
       org.opencontainers.image.description="Hourly Avito search watcher that mails new listings" \
-      org.opencontainers.image.version="2.0.1" \
+      org.opencontainers.image.version="2.1.0" \
       org.opencontainers.image.revision="$VCS_REF"
 
 CMD ["python", "-m", "avito"]

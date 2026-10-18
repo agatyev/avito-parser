@@ -87,7 +87,7 @@ def identity(profile: Path) -> dict:
     from camoufox.pkgman import installed_verstr
     from camoufox.utils import launch_options
 
-    card = profile.parent / "identity.json"
+    card = profile / "identity.json"
     version = installed_verstr()
     with contextlib.suppress(ValueError, OSError):
         saved = json.loads(card.read_text(encoding="utf-8"))

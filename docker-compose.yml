@@ -4,7 +4,7 @@ services:
       context: .
       args:
         VCS_REF: "${VCS_REF:-unknown}"
-    image: "avito-parser:${AVITO_IMAGE_TAG:-2.0.1}"
+    image: "avito-parser:${AVITO_IMAGE_TAG:-2.1.0}"
     container_name: avito-parser
     restart: unless-stopped
     init: true
