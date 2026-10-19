@@ -9,7 +9,9 @@ WORKDIR /app
 
 RUN mkdir -p /app/home /app/data \
     && pip install --no-cache-dir --break-system-packages "camoufox[geoip]==0.5.8" \
-    && yes | camoufox fetch
+    && yes | camoufox fetch \
+    && test -d /app/home/.cache/camoufox/browsers/official \
+    && python -c "import fpgen, pathlib, sys; sys.exit(0 if (pathlib.Path(fpgen.__file__).parent / 'data').is_dir() else 1)"
 
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
@@ -23,7 +25,7 @@ RUN fc-cache -f
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="avito-parser" \
       org.opencontainers.image.description="Hourly Avito search watcher that mails new listings" \
-      org.opencontainers.image.version="2.1.0" \
+      org.opencontainers.image.version="2.2.0" \
       org.opencontainers.image.revision="$VCS_REF"
 
 CMD ["python", "-m", "avito"]

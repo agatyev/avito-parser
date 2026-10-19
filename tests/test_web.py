@@ -10,23 +10,14 @@ from avito.web import create_app
 class FakeMailer:
     ready = True
 
-    def __init__(self) -> None:
-        self.to = ["owner@example.com"]
-
-    def recipients(self):
-        return list(self.to)
-
-    def set_recipients(self, addresses):
-        self.to = sorted({value.lower() for value in addresses})
-        return list(self.to)
-
-    def send(self, name, listings):
+    def send(self, name, listings, to):
         return True
 
 
 @pytest.fixture
 def client(cfg, monkeypatch):
     store = Store(cfg.db)
+    store.add_recipient("owner@example.com")
     service = Service(cfg, store, FakeMailer())
     monkeypatch.setattr(service_module.browse, "fetch",
                         lambda *args, **kwargs: listing_page("1"))
@@ -67,15 +58,39 @@ def test_run_wakes_the_service(client):
     assert service.wake.is_set()
 
 
-def test_recipients_are_edited(client):
+def mailing(page):
+    return page.get("/api/state").get_json()["mail"]["to"]
+
+
+def test_recipients_are_added_and_removed(client):
     page = client[0]
-    added = page.post("/api/recipients", json={"action": "add", "email": "second@example.com"})
-    assert added.get_json()["to"] == ["owner@example.com", "second@example.com"]
-    removed = page.post("/api/recipients",
-                        json={"action": "remove", "email": "owner@example.com"})
-    assert removed.get_json()["to"] == ["second@example.com"]
     assert page.post("/api/recipients",
-                     json={"action": "remove", "email": "second@example.com"}).status_code == 400
+                     json={"action": "add", "email": " Second@Example.com "}).status_code == 200
+    assert [person["email"] for person in mailing(page)] == \
+        ["owner@example.com", "second@example.com"]
+    assert page.post("/api/recipients",
+                     json={"action": "add", "email": "second@example.com"}).status_code == 400
+    assert page.post("/api/recipients",
+                     json={"action": "add", "email": "не почта"}).status_code == 400
+    page.post("/api/recipients", json={"action": "remove", "email": "owner@example.com"})
+    assert [person["email"] for person in mailing(page)] == ["second@example.com"]
+
+
+def test_subscriptions_are_switched_per_address(client):
+    page = client[0]
+    page.post("/api/add", json={"url": "https://www.avito.ru/all?q=мини+пк"})
+    page.post("/api/recipients", json={"action": "add", "email": "second@example.com"})
+    search_id = page.get("/api/state").get_json()["searches"][0]["id"]
+    assert [person["searches"] for person in mailing(page)] == [[search_id], [search_id]]
+    off = page.post("/api/subscribe",
+                    json={"email": "second@example.com", "id": search_id, "on": False})
+    assert off.status_code == 200
+    assert [person["searches"] for person in mailing(page)] == [[search_id], []]
+    page.post("/api/subscribe", json={"email": "second@example.com", "id": search_id, "on": True})
+    assert [person["searches"] for person in mailing(page)] == [[search_id], [search_id]]
+    assert page.post("/api/subscribe",
+                     json={"email": "nobody@example.com", "id": search_id,
+                           "on": True}).status_code == 400
 
 
 def test_outsiders_are_refused(client):

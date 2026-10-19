@@ -1,3 +1,5 @@
+import pytest
+
 from avito.parse import Listing
 
 
@@ -56,3 +58,58 @@ def test_toggle_filters_active(store):
 
 def test_remember_ignores_unknown_search(store):
     assert store.remember("deadbeef", items("1")) == []
+
+
+def test_new_recipient_gets_every_search_and_every_search_gets_everyone(store):
+    first = store.add("мини пк", "https://www.avito.ru/all/a")
+    store.add_recipient("me@example.com")
+    second = store.add("дачи", "https://www.avito.ru/all/b")
+    assert sorted(store.recipients()[0].searches) == sorted([first.id, second.id])
+    assert store.subscribers(second.id) == ["me@example.com"]
+
+
+def test_subscriptions_are_per_address(store):
+    pc = store.add("мини пк", "https://www.avito.ru/all/a")
+    dacha = store.add("дачи", "https://www.avito.ru/all/b")
+    store.add_recipient("me@example.com")
+    store.add_recipient("work@example.com")
+    store.subscribe("work@example.com", dacha.id, False)
+    assert store.subscribers(pc.id) == ["me@example.com", "work@example.com"]
+    assert store.subscribers(dacha.id) == ["me@example.com"]
+    store.subscribe("work@example.com", dacha.id, True)
+    assert store.subscribers(dacha.id) == ["me@example.com", "work@example.com"]
+
+
+def test_removed_address_and_deleted_search_take_subscriptions_with_them(store):
+    search = store.add("дачи", "https://www.avito.ru/all/b")
+    store.add_recipient("me@example.com")
+    store.remove_recipient("me@example.com")
+    assert store.recipients() == []
+    assert store.subscribers(search.id) == []
+    store.add_recipient("me@example.com")
+    store.delete(search.id)
+    assert store.recipients()[0].searches == []
+
+
+def test_unknown_address_or_search_cannot_be_subscribed(store):
+    search = store.add("дачи", "https://www.avito.ru/all/b")
+    with pytest.raises(ValueError):
+        store.subscribe("nobody@example.com", search.id, True)
+    store.add_recipient("me@example.com")
+    with pytest.raises(ValueError):
+        store.subscribe("me@example.com", "deadbeef", True)
+
+
+def test_same_address_is_added_once(store):
+    store.add_recipient("me@example.com")
+    with pytest.raises(ValueError):
+        store.add_recipient("me@example.com")
+
+
+def test_seed_only_fills_an_empty_mailing(store):
+    search = store.add("дачи", "https://www.avito.ru/all/b")
+    store.seed_recipients(["first@example.com", "second@example.com"])
+    store.seed_recipients(["third@example.com"])
+    assert [person.email for person in store.recipients()] == \
+        ["first@example.com", "second@example.com"]
+    assert store.subscribers(search.id) == ["first@example.com", "second@example.com"]

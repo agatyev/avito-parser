@@ -1,6 +1,6 @@
 [project]
 name = "avito-parser"
-version = "2.1.0"
+version = "2.2.0"
 description = "Раз в час смотрит выдачу Avito по ссылке и присылает новые объявления письмом"
 readme = "README.md"
 requires-python = ">=3.11"

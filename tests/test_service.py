@@ -12,14 +12,13 @@ class FakeMailer:
         self.ready = True
         self.works = True
         self.sent: list[list[str]] = []
+        self.letters: list[tuple[str, list[str]]] = []
 
-    def recipients(self):
-        return ["to@example.com"]
-
-    def send(self, name, listings):
+    def send(self, name, listings, to):
         if not self.works:
             return False
         self.sent.append([item.id for item in listings])
+        self.letters.append((name, list(to)))
         return True
 
 
@@ -31,6 +30,7 @@ class Harness:
         self.html = ""
         self.error: Exception | None = None
         monkeypatch.setattr(service_module.browse, "fetch", self.fetch)
+        self.store.add_recipient("to@example.com")
         self.search = self.store.add("дома", "https://www.avito.ru/all/doma")
 
     def fetch(self, profile, url, known=(), max_pages=3):
@@ -132,6 +132,28 @@ def test_paused_search_is_skipped(avito):
     avito.store.toggle(avito.search.id, False)
     avito.hour()
     assert avito.sent == []
+
+
+def test_letters_go_only_to_subscribers(avito):
+    other = avito.store.add("дачи", "https://www.avito.ru/all/dachi")
+    avito.store.add_recipient("work@example.com")
+    avito.store.subscribe("work@example.com", other.id, False)
+    avito.shows("1")
+    avito.hour()
+    assert avito.mailer.letters == [("дома", ["to@example.com", "work@example.com"]),
+                                    ("дачи", ["to@example.com"])]
+
+
+def test_nobody_subscribed_keeps_the_queue(avito):
+    avito.store.remove_recipient("to@example.com")
+    avito.shows("1")
+    avito.hour()
+    assert avito.sent == []
+    assert avito.store.waiting() == 1
+    avito.store.add_recipient("to@example.com")
+    avito.hour()
+    assert avito.sent == [["1"]]
+    assert avito.store.waiting() == 0
 
 
 def test_first_run_constant_is_small():

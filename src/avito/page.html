@@ -51,6 +51,18 @@ button:disabled { opacity: .45; cursor: default; }
 .dot.run { background: var(--blue); }
 .dot.off { background: var(--grey); }
 .dot.err { background: var(--red); }
+.row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+}
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.chip {
+  padding: 7px 13px; border: 0; border-radius: 999px; background: #f2f1f0;
+  color: var(--grey); font-size: 14px; font-weight: 500; cursor: pointer;
+}
+.chip:hover { background: #e6e5e4; }
+.chip.on { background: var(--blue); color: #fff; }
+.chip.on:hover { background: var(--blue-dark); }
 .item { padding: 16px 0; border-top: 1px solid var(--line); }
 .item:first-child { border-top: 0; padding-top: 0; }
 .item-name { font-size: 16px; font-weight: 600; }
@@ -101,6 +113,11 @@ a:hover { text-decoration: underline; }
     </div>
     <div class="msg" id="mail-msg"></div>
     <div id="mails"></div>
+    <div class="hint">
+      Под каждым адресом — все поиски. Нажмите на поиск, чтобы включить или выключить
+      письма по нему для этого адреса. Новый поиск уходит на все адреса, новый адрес
+      получает все поиски — дальше выключайте лишнее.
+    </div>
   </div>
 
   <div class="card">
@@ -158,7 +175,9 @@ async function act(fn) {
 }
 
 function searchRow(s) {
-  const bits = [s.enabled ? ago(s.last_at) : "на паузе"];
+  const to = (state.mail.to || []).filter((m) => m.searches.includes(s.id)).map((m) => m.email);
+  const bits = [s.enabled ? ago(s.last_at) : "на паузе",
+                to.length ? `письма: ${esc(to.join(", "))}` : "письма никому"];
   return `
     <div class="item">
       <div class="item-name ${s.enabled ? "" : "off"}">${esc(s.name)}</div>
@@ -169,6 +188,23 @@ function searchRow(s) {
           ${s.enabled ? "Пауза" : "Включить"}</button>
         <button class="small warn" data-del="${esc(s.id)}">${armed === s.id ? "Точно удалить?" : "Удалить"}</button>
       </div>
+    </div>`;
+}
+
+function mailRow(m) {
+  const chips = state.searches.map((s) => {
+    const on = m.searches.includes(s.id);
+    return `<button class="chip ${on ? "on" : ""}" data-sub="${esc(s.id)}" ` +
+      `data-email="${esc(m.email)}" data-on="${on ? 0 : 1}">${esc(s.name)}</button>`;
+  }).join("");
+  return `
+    <div class="item">
+      <div class="row">
+        <span class="item-name">${esc(m.email)}</span>
+        <button class="small plain" data-mail="${esc(m.email)}">убрать</button>
+      </div>
+      ${chips ? `<div class="chips">${chips}</div>`
+              : `<div class="meta">поисков пока нет — добавьте ссылку сверху</div>`}
     </div>`;
 }
 
@@ -190,6 +226,7 @@ async function refresh() {
     return;
   }
   const s = state.status;
+  const mails = state.mail.to || [];
   const live = state.searches.filter((x) => x.enabled).length;
   const doing = String(s.activity ?? "").trim();
   let text;
@@ -200,6 +237,7 @@ async function refresh() {
   else text = `<span class="dot on"></span>слежу, следующий заход ${left(s.next_at)}`;
   if (s.error) text += ` · <span style="color:var(--red)">${esc(s.error)}</span>`;
   if (!state.mail.ready) text += ` · <span style="color:var(--red)">почта не настроена</span>`;
+  else if (!mails.length) text += ` · <span style="color:var(--red)">некому слать</span>`;
   if (s.waiting) text += ` · ждут отправки: ${s.waiting}`;
   $("state").innerHTML = text;
   $("check").disabled = s.running || !live;
@@ -212,10 +250,8 @@ async function refresh() {
   $("found").innerHTML = state.found.length
     ? state.found.map(foundRow).join("") : "пока ничего";
 
-  $("mails").innerHTML = (state.mail.to || []).map((m) =>
-    `<div class="line"><span>${esc(m)}</span>` +
-    `<button class="small plain" data-mail="${esc(m)}">убрать</button></div>`
-  ).join("") || "<i>пока некому слать</i>";
+  $("mails").className = mails.length ? "" : "empty";
+  $("mails").innerHTML = mails.length ? mails.map(mailRow).join("") : "пока некому слать";
 }
 
 function mailSay(text) {
@@ -239,6 +275,18 @@ $("mail-add").onclick = async () => {
 };
 
 $("mails").onclick = async (e) => {
+  const chip = e.target.closest("button[data-sub]");
+  if (chip) {
+    try {
+      await api("/api/subscribe", { email: chip.dataset.email, id: chip.dataset.sub,
+                                    on: chip.dataset.on === "1" });
+      mailSay("");
+      await refresh();
+    } catch (err) {
+      mailSay(err.message);
+    }
+    return;
+  }
   const btn = e.target.closest("button[data-mail]");
   if (!btn) return;
   try {

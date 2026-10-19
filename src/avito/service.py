@@ -6,7 +6,7 @@ import time
 
 from . import browse
 from .config import Config
-from .mail import Mailer
+from .mail import ADDRESS, Mailer
 from .parse import empty_results, item_ids, parse
 from .store import Search, Store
 
@@ -14,6 +14,7 @@ log = logging.getLogger(__name__)
 
 FIRST_RUN_SENDS = 5
 RETRY_PAUSE = 15
+MAX_EMAIL = 254
 BLOCKED_NOTICE = ("Avito отдал страницу антибота. Следующий заход через час — обычно этого "
                   "хватает. Если повторяется каждый час, нужен российский резидентный прокси.")
 
@@ -30,9 +31,9 @@ class Service:
 
     def run(self) -> None:
         period = self.cfg.every_minutes * 60
-        log.info("Смотрю каждые %d мин, поисков в работе: %d, почта: %s",
+        log.info("Смотрю каждые %d мин, поисков в работе: %d, адресов в рассылке: %d",
                  self.cfg.every_minutes, len(self.store.active()),
-                 ", ".join(self.mailer.recipients()) or "не настроена")
+                 len(self.store.recipients()))
         while True:
             started = time.monotonic()
             self.cycle()
@@ -109,12 +110,14 @@ class Service:
         waiting = self.store.unsent(search.id)
         if not waiting:
             return
-        if not self.mailer.ready:
-            log.warning("[%s] почта не настроена, объявлений ждёт: %d",
-                        search.name, len(waiting))
+        to = self.store.subscribers(search.id)
+        if not self.mailer.ready or not to:
+            log.warning("[%s] %s, объявлений ждёт: %d", search.name,
+                        "почта не настроена" if not self.mailer.ready else "никто не подписан",
+                        len(waiting))
             return
         self.state["activity"] = f"{search.name}: отправляю {len(waiting)}"
-        if self.mailer.send(search.name, waiting):
+        if self.mailer.send(search.name, waiting, to):
             self.store.mark_sent(search.id, [item.id for item in waiting])
 
     def snapshot(self, search_id: str, html: str) -> None:
@@ -132,3 +135,11 @@ class Service:
         log.info("Добавлен поиск: %s", search.name)
         self.trigger()
         return search
+
+    def add_recipient(self, email: str) -> str:
+        email = (email or "").strip().lower()
+        if len(email) > MAX_EMAIL or not ADDRESS.fullmatch(email):
+            raise ValueError("не похоже на почту")
+        self.store.add_recipient(email)
+        log.info("Новый адрес в рассылке: %s", email)
+        return email

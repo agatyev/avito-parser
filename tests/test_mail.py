@@ -1,5 +1,3 @@
-import pytest
-
 from avito.config import Mail
 from avito.mail import Mailer, as_html, as_text, subject
 from avito.parse import Listing
@@ -33,39 +31,27 @@ def test_body_has_links_prices_and_cut_description():
     assert as_text(ITEMS).count("https://www.avito.ru/items/") == 2
 
 
-def test_send_collects_message_and_reports_success(tmp_path, monkeypatch):
-    mailer = Mailer(settings(), store=tmp_path / "mail.json")
+def test_send_goes_only_to_the_given_addresses(monkeypatch):
+    mailer = Mailer(settings())
     posted = []
     monkeypatch.setattr(mailer, "_deliver", posted.append)
-    assert mailer.send("дома", ITEMS) is True
-    assert posted[0]["To"] == "owner@example.com"
+    assert mailer.send("дома", ITEMS, ["one@example.com", "two@example.com"]) is True
+    assert posted[0]["To"] == "one@example.com, two@example.com"
     assert posted[0]["From"] == "bot@example.com"
     assert posted[0].get_content_type() == "multipart/alternative"
 
 
-def test_failed_delivery_is_reported_not_raised(tmp_path, monkeypatch):
-    mailer = Mailer(settings(), store=tmp_path / "mail.json")
+def test_failed_delivery_is_reported_not_raised(monkeypatch):
+    mailer = Mailer(settings())
 
     def explode(_message):
         raise OSError("сеть пропала")
 
     monkeypatch.setattr(mailer, "_deliver", explode)
-    assert mailer.send("дома", ITEMS) is False
+    assert mailer.send("дома", ITEMS, ["owner@example.com"]) is False
 
 
-def test_unconfigured_mail_is_not_ready(tmp_path):
-    assert Mailer(Mail(), store=tmp_path / "mail.json").ready is False
-    assert Mailer(Mail(), store=tmp_path / "mail.json").send("дома", ITEMS) is False
-
-
-def test_recipients_persist_and_are_validated(tmp_path):
-    path = tmp_path / "mail.json"
-    mailer = Mailer(settings(), store=path)
-    assert mailer.recipients() == ["owner@example.com"]
-    assert mailer.set_recipients(["A@b.ru", "owner@example.com"]) == \
-        ["a@b.ru", "owner@example.com"]
-    assert Mailer(settings(), store=path).recipients() == ["a@b.ru", "owner@example.com"]
-    with pytest.raises(ValueError):
-        mailer.set_recipients(["не почта"])
-    with pytest.raises(ValueError):
-        mailer.set_recipients([])
+def test_nothing_is_sent_without_settings_or_addresses():
+    assert Mailer(Mail()).ready is False
+    assert Mailer(Mail()).send("дома", ITEMS, ["owner@example.com"]) is False
+    assert Mailer(settings()).send("дома", ITEMS, []) is False

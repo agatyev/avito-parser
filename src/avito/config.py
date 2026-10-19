@@ -23,10 +23,6 @@ class Mail:
     sender: str = ""
     to: list[str] = field(default_factory=list)
 
-    @property
-    def ready(self) -> bool:
-        return bool(self.host and self.sender and self.to)
-
 
 @dataclass(slots=True)
 class Config:

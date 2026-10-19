@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 import smtplib
-import uuid
 from collections.abc import Sequence
 from email.message import EmailMessage
 from html import escape
-from pathlib import Path
 
 from .config import Mail
 from .parse import Listing
@@ -67,53 +64,19 @@ def as_html(listings: Sequence[Listing]) -> str:
 
 
 class Mailer:
-    def __init__(self, cfg: Mail, store: Path | None = None) -> None:
+    def __init__(self, cfg: Mail) -> None:
         self.cfg = cfg
-        self.store = store
-        self._to = self._stored() or list(cfg.to)
         if not cfg.host:
             log.warning("Почта не настроена — объявления останутся только на странице")
 
     @property
     def ready(self) -> bool:
-        return bool(self.cfg.host and self.cfg.sender and self._to)
+        return bool(self.cfg.host and self.cfg.sender)
 
-    def recipients(self) -> list[str]:
-        return list(self._to)
-
-    def _stored(self) -> list[str]:
-        if not self.store or not self.store.exists():
-            return []
-        try:
-            saved = json.loads(self.store.read_text(encoding="utf-8"))
-        except (ValueError, OSError):
-            log.warning("Файл рассылки испорчен — беру адреса из MAIL_TO")
-            return []
-        if not isinstance(saved, list):
-            return []
-        return sorted({value.strip().lower() for value in saved
-                       if isinstance(value, str) and ADDRESS.fullmatch(value.strip())})
-
-    def set_recipients(self, addresses: Sequence[str]) -> list[str]:
-        clean = sorted({str(value).strip().lower() for value in addresses if str(value).strip()})
-        bad = [value for value in clean if not ADDRESS.fullmatch(value)]
-        if bad or not clean:
-            raise ValueError("не похоже на почту: " + ", ".join(bad or ["пусто"]))
-        if self.store:
-            tmp = self.store.with_name(f".{self.store.name}.{uuid.uuid4().hex}.tmp")
-            try:
-                tmp.write_text(json.dumps(clean), encoding="utf-8")
-                tmp.replace(self.store)
-            except OSError:
-                tmp.unlink(missing_ok=True)
-                raise
-        self._to = clean
-        return list(self._to)
-
-    def send(self, name: str, listings: Sequence[Listing]) -> bool:
+    def send(self, name: str, listings: Sequence[Listing], to: Sequence[str]) -> bool:
         if not listings:
             return True
-        if not self.ready:
+        if not self.ready or not to:
             for listing in listings:
                 log.info("НОВОЕ [%s]: %s | %s | %s",
                          name, listing.title, facts(listing), listing.url)
@@ -121,7 +84,7 @@ class Mailer:
         message = EmailMessage()
         message["Subject"] = subject(name, listings)
         message["From"] = self.cfg.sender
-        message["To"] = ", ".join(self._to)
+        message["To"] = ", ".join(to)
         message.set_content(as_text(listings))
         message.add_alternative(as_html(listings), subtype="html")
         try:
@@ -130,7 +93,7 @@ class Mailer:
             log.error("Письмо не ушло (%s), объявления остаются в очереди: %s",
                       len(listings), exc)
             return False
-        log.info("Отправлено письмо на %s: %s", ", ".join(self._to), message["Subject"])
+        log.info("Отправлено письмо на %s: %s", ", ".join(to), message["Subject"])
         return True
 
     def _deliver(self, message: EmailMessage) -> None:

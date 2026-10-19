@@ -24,7 +24,9 @@ def snapshot(service) -> dict:
     return {
         "status": {**service.state, "every_minutes": service.cfg.every_minutes,
                    "waiting": service.store.waiting()},
-        "mail": {"ready": service.mailer.ready, "to": service.mailer.recipients()},
+        "mail": {"ready": service.mailer.ready,
+                 "to": [{"email": person.email, "searches": person.searches}
+                        for person in service.store.recipients()]},
         "searches": [{"id": s.id, "name": s.name, "url": s.url,
                       "enabled": s.enabled, "last_at": s.last_at} for s in searches],
         "found": [{"title": row["title"], "url": row["url"], "price_text": row["price_text"],
@@ -107,21 +109,22 @@ def create_app(service) -> Flask:
     @app.post("/api/recipients")
     def api_recipients():
         data = request.get_json(silent=True) or {}
-        address = (data.get("email") or "").strip().lower()
-        addresses = service.mailer.recipients()
+        email = (data.get("email") or "").strip().lower()
         if data.get("action") == "add":
-            addresses.append(address)
+            service.add_recipient(email)
         elif data.get("action") == "remove":
-            if address not in addresses:
-                raise ValueError("такого адреса нет в рассылке")
-            if len(addresses) == 1:
-                raise ValueError("нужен хотя бы один адрес — иначе письма некуда слать")
-            addresses.remove(address)
+            service.store.remove_recipient(email)
+            log.info("Адрес убран из рассылки: %s", email)
         else:
             raise ValueError("неизвестное действие")
-        saved = service.mailer.set_recipients(addresses)
-        log.info("Рассылка: %s", ", ".join(saved))
-        return jsonify(to=saved)
+        return jsonify(ok=True)
+
+    @app.post("/api/subscribe")
+    def api_subscribe():
+        data = request.get_json(silent=True) or {}
+        service.store.subscribe((data.get("email") or "").strip().lower(),
+                                str(data.get("id") or ""), bool(data.get("on")))
+        return jsonify(ok=True)
 
     return app
 

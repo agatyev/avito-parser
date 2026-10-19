@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS seen (
 );
 CREATE INDEX IF NOT EXISTS seen_unsent ON seen(search_id, sent);
 CREATE INDEX IF NOT EXISTS seen_fresh ON seen(first_seen DESC);
+CREATE TABLE IF NOT EXISTS recipients (
+    email    TEXT PRIMARY KEY,
+    added_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS subscriptions (
+    email     TEXT NOT NULL,
+    search_id TEXT NOT NULL,
+    PRIMARY KEY (email, search_id),
+    FOREIGN KEY (email) REFERENCES recipients(email) ON DELETE CASCADE,
+    FOREIGN KEY (search_id) REFERENCES searches(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS subscriptions_search ON subscriptions(search_id);
 """
 
 
@@ -46,6 +58,12 @@ class Search:
     url: str
     enabled: bool = True
     last_at: str = ""
+
+
+@dataclass(slots=True)
+class Recipient:
+    email: str
+    searches: list[str]
 
 
 def _search(row: sqlite3.Row) -> Search:
@@ -94,6 +112,8 @@ class Store:
         with self.connect() as conn:
             conn.execute("INSERT INTO searches (id, name, url, added_at) VALUES (?,?,?,?)",
                          (search.id, search.name, search.url, _now()))
+            conn.execute("""INSERT INTO subscriptions (email, search_id)
+                            SELECT email, ? FROM recipients""", (search.id,))
         return search
 
     def toggle(self, search_id: str, enabled: bool) -> None:
@@ -152,6 +172,55 @@ class Store:
         with self.connect() as conn:
             return conn.execute("SELECT COUNT(*) FROM seen WHERE sent = 0").fetchone()[0]
 
+    def recipients(self) -> list[Recipient]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT recipients.email AS email,
+                          COALESCE(GROUP_CONCAT(subscriptions.search_id), '') AS searches
+                   FROM recipients
+                   LEFT JOIN subscriptions ON subscriptions.email = recipients.email
+                   GROUP BY recipients.email
+                   ORDER BY recipients.added_at, recipients.email""").fetchall()
+        return [Recipient(email=row["email"],
+                          searches=[part for part in row["searches"].split(",") if part])
+                for row in rows]
+
+    def subscribers(self, search_id: str) -> list[str]:
+        with self.connect() as conn:
+            return [row[0] for row in conn.execute(
+                "SELECT email FROM subscriptions WHERE search_id = ? ORDER BY email",
+                (search_id,))]
+
+    def add_recipient(self, email: str) -> None:
+        with self.connect() as conn:
+            if conn.execute("SELECT 1 FROM recipients WHERE email = ?", (email,)).fetchone():
+                raise ValueError("такой адрес уже есть")
+            _add_recipient(conn, email)
+
+    def remove_recipient(self, email: str) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM recipients WHERE email = ?", (email,))
+
+    def subscribe(self, email: str, search_id: str, on: bool) -> None:
+        with self.connect() as conn:
+            if not on:
+                conn.execute("DELETE FROM subscriptions WHERE email = ? AND search_id = ?",
+                             (email, search_id))
+                return
+            if not conn.execute("SELECT 1 FROM recipients WHERE email = ?", (email,)).fetchone():
+                raise ValueError("такого адреса нет в рассылке")
+            if not conn.execute("SELECT 1 FROM searches WHERE id = ?", (search_id,)).fetchone():
+                raise ValueError("такого поиска нет")
+            conn.execute("INSERT OR IGNORE INTO subscriptions (email, search_id) VALUES (?,?)",
+                         (email, search_id))
+
+    def seed_recipients(self, emails: Sequence[str]) -> None:
+        with self.connect() as conn:
+            if conn.execute("SELECT 1 FROM recipients").fetchone():
+                return
+            for email in emails:
+                _add_recipient(conn, email)
+
     def recent(self, limit: int = 50) -> list[dict]:
         with self.connect() as conn:
             rows = conn.execute(
@@ -159,6 +228,13 @@ class Store:
                    LEFT JOIN searches ON searches.id = seen.search_id
                    ORDER BY first_seen DESC, seen.rowid DESC LIMIT ?""", (limit,)).fetchall()
         return [dict(row) for row in rows]
+
+
+def _add_recipient(conn: sqlite3.Connection, email: str) -> None:
+    conn.execute("INSERT OR IGNORE INTO recipients (email, added_at) VALUES (?,?)",
+                 (email, _now()))
+    conn.execute("""INSERT OR IGNORE INTO subscriptions (email, search_id)
+                    SELECT ?, id FROM searches""", (email,))
 
 
 def _now() -> str:

@@ -17,7 +17,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config.load()
     config.setup_logging(cfg.log_level)
     store = Store(cfg.db)
-    service = Service(cfg, store, Mailer(cfg.mail, store=cfg.db.parent / "mail.json"))
+    store.seed_recipients(cfg.mail.to)
+    service = Service(cfg, store, Mailer(cfg.mail))
     if once:
         service.cycle()
         return 0
